@@ -39,6 +39,48 @@ extern int wxOpenModalDialogsCount;
 // we use normal item but with a special id for the menu title
 static const int wxGTK_TITLE_ID = -3;
 
+
+GtkWidget* package_menuitem_get_packed(GtkWidget* menuItem) {
+    GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(menuItem))));
+    if (children == NULL) return NULL;
+        
+    GtkWidget* child = GTK_WIDGET(g_list_first(children)->data);
+    if (child == NULL) return NULL;
+
+    return child;
+}
+
+GtkWidget* package_menuitem_get_label(GtkWidget* menuItem) {
+    GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(menuItem))));
+    if (children == NULL) return NULL;
+        
+    GtkWidget* child = GTK_WIDGET(g_list_last(children)->data);
+    if (child == NULL) return NULL;
+
+    return child;
+}
+
+GtkWidget* package_menuitem_new_with_packed(GtkWidget* packed) {
+    GtkWidget *menuItem, *box, *label;
+
+    menuItem = gtk_menu_item_new();
+    box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    label = gtk_accel_label_new("");
+
+    // todo : don't hardcode 24px
+    gtk_widget_set_size_request(GTK_WIDGET(packed), 24, 24);
+
+    gtk_box_pack_start(GTK_BOX (box), packed,  FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX (box), label,  TRUE, TRUE, 0);
+    gtk_container_add (GTK_CONTAINER (menuItem), box);
+
+    gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+    #ifdef wxUSE_ACCEL
+    gtk_accel_label_set_accel_widget (GTK_ACCEL_LABEL (label), menuItem);
+    #endif
+    return menuItem;
+}
+
 #if wxUSE_ACCEL
 namespace
 {
@@ -698,11 +740,7 @@ void wxMenuItem::SetGtkLabel()
     GtkLabel* label;
 #if defined(__WXGTK4__) || defined(__WXGTK3__) 
     if (GetKind() == wxITEM_NORMAL) {
-        GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(m_menuItem))));
-
-        if (children == NULL) return;
-        label = GTK_LABEL(g_list_last(children)->data);
-        
+        label = GTK_LABEL(package_menuitem_get_label(m_menuItem));
         if (label == NULL) return;
     } else {
         label = GTK_LABEL(gtk_bin_get_child(GTK_BIN(m_menuItem)));
@@ -780,11 +818,9 @@ void wxMenuItem::SetupBitmaps(wxWindow *win)
     (void)win;
     if ( m_menuItem && m_bitmap.IsOk() )
     {
-        GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(m_menuItem))));
-        if (children == NULL) return;
-        
-        GtkImage* menu_image = GTK_IMAGE(g_list_first(children)->data);
-        if (menu_image == NULL) return;
+        GtkWidget* menuImage = package_menuitem_get_packed(m_menuItem);
+        if (menuImage == NULL) return;
+
         GdkPixbuf* pixbuf = NULL;
         {  
             // WX_GTK_IMAGE(image)->Set(m_bitmap); function, but with existing gtkImage
@@ -797,7 +833,7 @@ void wxMenuItem::SetupBitmaps(wxWindow *win)
                 pixbuf = bitmap.GetPixbuf();
             }
         }
-        gtk_image_set_from_pixbuf(menu_image, pixbuf);
+        gtk_image_set_from_pixbuf(GTK_IMAGE(menuImage), pixbuf);
     }
 #else
     if ( m_menuItem && m_bitmap.IsOk() )
@@ -1034,11 +1070,11 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
 
                 GSList* group = NULL;
                 if ( radioGroupItem )
-                {
+                {       
                     group = gtk_radio_menu_item_get_group(
                               GTK_RADIO_MENU_ITEM(radioGroupItem->GetMenuItem())
                             );
-                }
+                    }
 
                 menuItem = gtk_radio_menu_item_new_with_label(group, "");
             }
@@ -1047,27 +1083,10 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
             wxFAIL_MSG("unexpected menu item kind");
             wxFALLTHROUGH;
         case wxITEM_NORMAL:
-#if defined(__WXGTK4__) || defined(__WXGTK3__) 
-            // create elements and nest
-            GtkWidget *box, *icon, *label;
-            menuItem = gtk_menu_item_new();
-            box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-            icon = gtk_image_new();
-            label = gtk_accel_label_new("");
-
-            gtk_box_pack_start(GTK_BOX (box), icon,  FALSE, FALSE, 0);
-            gtk_box_pack_start(GTK_BOX (box), label,  TRUE, TRUE, 0);
-            gtk_container_add (GTK_CONTAINER (menuItem), box);
-
-            gtk_widget_set_size_request(label, 200, -1);
-
-
-            gtk_label_set_xalign (GTK_LABEL (label), 0.0);
-            gtk_accel_label_set_accel_widget (GTK_ACCEL_LABEL (label), menuItem);
-
-
-            // set size request so (void) images still pad text
-            gtk_widget_set_size_request(GTK_WIDGET(icon), 24, 24);
+#if defined(__WXGTK4__) || defined(__WXGTK3__)
+// create elements and nest
+            GtkWidget* icon = gtk_image_new(); 
+            menuItem = package_menuitem_new_with_packed(icon);
 
             if (mitem->GetBitmap().IsOk())
             {
@@ -1085,7 +1104,6 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
 #else 
                     gtk_image_set_from_icon_name(GTK_IMAGE(icon), stockid, GTK_ICON_SIZE_MENU);
 #endif
-                    gtk_label_set_text(GTK_LABEL(label), stockid);
                 } else {
                     // new lable(""), already done
                     // new image(), already done
