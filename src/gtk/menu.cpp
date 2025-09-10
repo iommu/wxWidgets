@@ -695,7 +695,21 @@ void wxMenuItem::SetItemLabel( const wxString& str )
 void wxMenuItem::SetGtkLabel()
 {
     const wxString text = wxConvertMnemonicsToGTK(m_text.BeforeFirst('\t'));
-    GtkLabel* label = GTK_LABEL(gtk_bin_get_child(GTK_BIN(m_menuItem)));
+    GtkLabel* label;
+#if defined(__WXGTK4__) || defined(__WXGTK3__) 
+    if (GetKind() == wxITEM_NORMAL) {
+        GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(m_menuItem))));
+
+        if (children == NULL) return;
+        label = GTK_LABEL(g_list_last(children)->data);
+        
+        if (label == NULL) return;
+    } else {
+        label = GTK_LABEL(gtk_bin_get_child(GTK_BIN(m_menuItem)));
+    }
+#else
+    label = GTK_LABEL(gtk_bin_get_child(GTK_BIN(m_menuItem)));
+#endif
     gtk_label_set_text_with_mnemonic(label, wxGTK_CONV_SYS(text));
 #if wxUSE_ACCEL
     GtkAccel gtkAccel(this);
@@ -762,7 +776,30 @@ void wxMenuItem::ClearExtraAccels()
 
 void wxMenuItem::SetupBitmaps(wxWindow *win)
 {
-#ifndef __WXGTK4__
+#if defined(__WXGTK4__) || defined(__WXGTK3__)
+    (void)win;
+    if ( m_menuItem && m_bitmap.IsOk() )
+    {
+        GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(m_menuItem))));
+        if (children == NULL) return;
+        
+        GtkImage* menu_image = GTK_IMAGE(g_list_first(children)->data);
+        if (menu_image == NULL) return;
+        GdkPixbuf* pixbuf = NULL;
+        {  
+            // WX_GTK_IMAGE(image)->Set(m_bitmap); function, but with existing gtkImage
+            // Always set the default bitmap to use the correct size, even if we draw a
+            // different bitmap below.
+            wxBitmap bitmap = m_bitmap.GetBitmap(wxDefaultSize);
+            
+            if (bitmap.IsOk())
+            {
+                pixbuf = bitmap.GetPixbuf();
+            }
+        }
+        gtk_image_set_from_pixbuf(menu_image, pixbuf);
+    }
+#else
     if ( m_menuItem && m_bitmap.IsOk() )
     {
         GtkWidget* image = wxGtkImage::New(win);
@@ -861,6 +898,11 @@ void wxMenu::Init()
     m_accel = gtk_accel_group_new();
     m_menu = gtk_menu_new();
     g_object_ref_sink(m_menu);
+
+    #if defined(__WXGTK4__) || defined(__WXGTK3__)
+    // gtk 3/4 reserves space for toggle buttons which makes icon menu items offset to the right
+    gtk_menu_set_reserve_toggle_size(GTK_MENU (m_menu), FALSE);
+    #endif
 
     m_owner = NULL;
 
@@ -1005,12 +1047,52 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
             wxFAIL_MSG("unexpected menu item kind");
             wxFALLTHROUGH;
         case wxITEM_NORMAL:
-#ifdef __WXGTK4__
-            //TODO GtkImageMenuItem is gone, have to implement it ourselves with
-            //   GtkMenuItem GtkBox GtkAccelLabel GtkImage
-            menuItem = gtk_menu_item_new_with_label("");
+#if defined(__WXGTK4__) || defined(__WXGTK3__) 
+            // create elements and nest
+            GtkWidget *box, *icon, *label;
+            menuItem = gtk_menu_item_new();
+            box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+            icon = gtk_image_new();
+            label = gtk_accel_label_new("");
+
+            gtk_box_pack_start(GTK_BOX (box), icon,  FALSE, FALSE, 0);
+            gtk_box_pack_start(GTK_BOX (box), label,  TRUE, TRUE, 0);
+            gtk_container_add (GTK_CONTAINER (menuItem), box);
+
+            gtk_widget_set_size_request(label, 200, -1);
+
+
+            gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+            gtk_accel_label_set_accel_widget (GTK_ACCEL_LABEL (label), menuItem);
+
+
+            // set size request so (void) images still pad text
+            gtk_widget_set_size_request(GTK_WIDGET(icon), 24, 24);
+
+            if (mitem->GetBitmap().IsOk())
+            {
+                // new lable(""), already done
+                // new image(), already done
+            }
+            else 
+            {
+                const char* stockid = wxGetStockGtkID(mitem->GetId());
+                if (stockid) {
+                    // use stock bitmap for this item if available on the assumption
+                    // that it never hurts to follow GTK+ conventions more closely
+#if defined(__WXGTK4__)
+                    gtk_image_set_from_icon_name(GTK_IMAGE(icon), stockid);
+#else 
+                    gtk_image_set_from_icon_name(GTK_IMAGE(icon), stockid, GTK_ICON_SIZE_MENU);
+#endif
+                    gtk_label_set_text(GTK_LABEL(label), stockid);
+                } else {
+                    // new lable(""), already done
+                    // new image(), already done
+                }
+            }
 #else
-            wxGCC_WARNING_SUPPRESS(deprecated-declarations)
+            wxGCC_WARNING_SUPPRESS(deprecated-declarations)            
             if (mitem->GetBitmap().IsOk())
             {
                 menuItem = gtk_image_menu_item_new_with_label("");
@@ -1033,7 +1115,13 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
 
     gtk_menu_shell_insert(GTK_MENU_SHELL(m_menu), menuItem, pos);
 
+    #if defined(__WXGTK4__) 
+    gtk_widget_set_visible( menuItem );
+    #elif defined(__WXGTK3__) 
+    gtk_widget_show_all( menuItem );
+    #else 
     gtk_widget_show( menuItem );
+    #endif
 
     if ( !mitem->IsSeparator() )
     {
