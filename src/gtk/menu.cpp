@@ -53,30 +53,39 @@ GtkWidget* gtk_menu_item_packed_get_child(GtkWidget* menuItem) {
 GtkWidget* package_menuitem_get_label(GtkWidget* menuItem) {
     GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(menuItem))));
     if (children == NULL) return NULL;
-        
-    GtkWidget* child = GTK_WIDGET(g_list_last(children)->data);
-    if (child == NULL) return NULL;
 
-    return child;
+    children = g_list_last(children);
+    if (children == NULL || children->prev == NULL) return NULL;
+
+    return GTK_WIDGET(children->prev->data);
 }
 
 GtkWidget* gtk_menu_item_packed_new_with_child(GtkWidget* packed) {
-    GtkWidget *menuItem, *box, *label;
+    GtkWidget *menuItem, *box, *label, *accel;
 
     menuItem = gtk_menu_item_new();
     box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-    label = gtk_accel_label_new("");
+    label = gtk_label_new("");
+
+    #ifdef wxUSE_ACCEL
+    accel = gtk_accel_label_new("");
+    #else
+    accel = gtk_label_new(""); // blank non-accel widget
+    #endif
 
     // todo : don't hardcode 24px
     gtk_widget_set_size_request(GTK_WIDGET(packed), 24, 24);
 
     gtk_box_pack_start(GTK_BOX (box), packed,  FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX (box), label,  TRUE, TRUE, 0);
+    gtk_box_pack_start(GTK_BOX (box), accel,  TRUE, TRUE, 0);
     gtk_container_add (GTK_CONTAINER (menuItem), box);
 
     gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+    gtk_label_set_xalign (GTK_LABEL (accel), 0.0);
+
     #ifdef wxUSE_ACCEL
-    gtk_accel_label_set_accel_widget (GTK_ACCEL_LABEL (label), menuItem);
+    gtk_accel_label_set_accel_widget (GTK_ACCEL_LABEL (accel), menuItem);
     #endif
     return menuItem;
 }
