@@ -40,7 +40,7 @@ extern int wxOpenModalDialogsCount;
 static const int wxGTK_TITLE_ID = -3;
 
 
-GtkWidget* package_menuitem_get_packed(GtkWidget* menuItem) {
+GtkWidget* gtk_menu_item_packed_get_child(GtkWidget* menuItem) {
     GList *children = gtk_container_get_children(GTK_CONTAINER(gtk_bin_get_child(GTK_BIN(menuItem))));
     if (children == NULL) return NULL;
         
@@ -60,7 +60,7 @@ GtkWidget* package_menuitem_get_label(GtkWidget* menuItem) {
     return child;
 }
 
-GtkWidget* package_menuitem_new_with_packed(GtkWidget* packed) {
+GtkWidget* gtk_menu_item_packed_new_with_child(GtkWidget* packed) {
     GtkWidget *menuItem, *box, *label;
 
     menuItem = gtk_menu_item_new();
@@ -79,6 +79,23 @@ GtkWidget* package_menuitem_new_with_packed(GtkWidget* packed) {
     gtk_accel_label_set_accel_widget (GTK_ACCEL_LABEL (label), menuItem);
     #endif
     return menuItem;
+}
+
+void menu_item_toggle_child_checkbutton(GtkMenuItem *menuItem, gpointer userData) {
+    (void)menuItem;
+    GtkToggleButton *checkItem = GTK_TOGGLE_BUTTON(userData);
+    
+    // Toggle child
+    gboolean active = gtk_toggle_button_get_active(checkItem);
+    gtk_toggle_button_set_active(checkItem, !active);
+}
+
+void menu_item_toggle_child_radiobutton(GtkMenuItem *menuItem, gpointer userData) {
+    (void)menuItem;  
+    GtkRadioButton *radio = GTK_RADIO_BUTTON(userData);
+
+    // Set child
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(radio), TRUE);
 }
 
 #if wxUSE_ACCEL
@@ -739,7 +756,7 @@ void wxMenuItem::SetGtkLabel()
     const wxString text = wxConvertMnemonicsToGTK(m_text.BeforeFirst('\t'));
     GtkLabel* label;
 #if defined(__WXGTK4__) || defined(__WXGTK3__) 
-    if (GetKind() == wxITEM_NORMAL) {
+    if (GetKind() == wxITEM_NORMAL || GetKind() == wxITEM_CHECK || GetKind() == wxITEM_RADIO) {
         label = GTK_LABEL(package_menuitem_get_label(m_menuItem));
         if (label == NULL) return;
     } else {
@@ -818,7 +835,7 @@ void wxMenuItem::SetupBitmaps(wxWindow *win)
     (void)win;
     if ( m_menuItem && m_bitmap.IsOk() )
     {
-        GtkWidget* menuImage = package_menuitem_get_packed(m_menuItem);
+        GtkWidget* menuImage = gtk_menu_item_packed_get_child(m_menuItem);
         if (menuImage == NULL) return;
 
         GdkPixbuf* pixbuf = NULL;
@@ -863,7 +880,15 @@ void wxMenuItem::Check( bool check )
             wxFALLTHROUGH;
         case wxITEM_CHECK:
             wxMenuItemBase::Check( check );
+            #if defined(__WXGTK4__) || defined(__WXGTK3__)
+            {
+                GtkWidget* menuCheck = gtk_menu_item_packed_get_child(m_menuItem);
+                if (menuCheck == NULL) exit(0);
+                gtk_toggle_button_set_active( GTK_TOGGLE_BUTTON(menuCheck), check);
+            }
+            #else
             gtk_check_menu_item_set_active( (GtkCheckMenuItem*)m_menuItem, (gint)check );
+            #endif
             break;
 
         default:
@@ -885,8 +910,13 @@ bool wxMenuItem::IsChecked() const
 
     wxCHECK_MSG( IsCheckable(), false,
                  wxT("can't get state of uncheckable item!") );
-
+    #if defined(__WXGTK4__) || defined(__WXGTK3__)
+    GtkWidget* menuCheck = gtk_menu_item_packed_get_child(m_menuItem);
+    if (menuCheck == NULL) return false;
+    return gtk_toggle_button_get_active( GTK_TOGGLE_BUTTON(menuCheck)) != 0;
+    #else
     return gtk_check_menu_item_get_active(GTK_CHECK_MENU_ITEM(m_menuItem)) != 0;
+    #endif
 }
 
 //-----------------------------------------------------------------------------
@@ -1035,7 +1065,11 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
             menuItem = gtk_separator_menu_item_new();
             break;
         case wxITEM_CHECK:
-            menuItem = gtk_check_menu_item_new_with_label("");
+            {
+                GtkWidget* checkItem = gtk_check_button_new();
+                menuItem = gtk_menu_item_packed_new_with_child(checkItem);
+                g_signal_connect(menuItem, "activate", G_CALLBACK(menu_item_toggle_child_checkbutton), checkItem);
+            }
             break;
         case wxITEM_RADIO:
             {
@@ -1071,22 +1105,25 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
                 GSList* group = NULL;
                 if ( radioGroupItem )
                 {       
-                    group = gtk_radio_menu_item_get_group(
-                              GTK_RADIO_MENU_ITEM(radioGroupItem->GetMenuItem())
-                            );
+                    GtkWidget* checkItem =  gtk_menu_item_packed_get_child(radioGroupItem->GetMenuItem());
+                    if (checkItem != NULL)  {
+                        group = gtk_radio_button_get_group(GTK_RADIO_BUTTON(checkItem));
                     }
-
-                menuItem = gtk_radio_menu_item_new_with_label(group, "");
+                }
+                GtkWidget* checkItem = gtk_radio_button_new(group);
+                menuItem = gtk_menu_item_packed_new_with_child(checkItem);
+                g_signal_connect(menuItem, "activate", G_CALLBACK(menu_item_toggle_child_radiobutton), checkItem);
             }
             break;
         default:
             wxFAIL_MSG("unexpected menu item kind");
             wxFALLTHROUGH;
         case wxITEM_NORMAL:
-#if defined(__WXGTK4__) || defined(__WXGTK3__)
-// create elements and nest
+        {
+            #if defined(__WXGTK4__) || defined(__WXGTK3__)
+            // create elements and nest
             GtkWidget* icon = gtk_image_new(); 
-            menuItem = package_menuitem_new_with_packed(icon);
+            menuItem = gtk_menu_item_packed_new_with_child(icon);
 
             if (mitem->GetBitmap().IsOk())
             {
@@ -1109,6 +1146,7 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
                     // new image(), already done
                 }
             }
+}
 #else
             wxGCC_WARNING_SUPPRESS(deprecated-declarations)            
             if (mitem->GetBitmap().IsOk())
