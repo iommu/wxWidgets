@@ -972,6 +972,10 @@ void wxMenu::Init()
 
     m_accel = gtk_accel_group_new();
     m_menu = gtk_menu_new();
+    #if defined(__WXGTK4__) || defined(__WXGTK3__)
+    // gtk 3/4 reserves space for toggle buttons which makes icon menu items offset to the right
+    gtk_menu_set_reserve_toggle_size(GTK_MENU (m_menu), FALSE);
+    #endif
     g_object_ref_sink(m_menu);
 
     #if defined(__WXGTK4__) || defined(__WXGTK3__)
@@ -1159,6 +1163,30 @@ void wxMenu::GtkAppend(wxMenuItem* mitem, int pos)
 #else
             wxGCC_WARNING_SUPPRESS(deprecated-declarations)            
             if (mitem->GetBitmap().IsOk())
+            {
+                // new lable(""), already done
+                // new image(), already done
+            }
+            else 
+            {
+                const char* stockid = wxGetStockGtkID(mitem->GetId());
+                if (stockid) {
+                    // use stock bitmap for this item if available on the assumption
+                    // that it never hurts to follow GTK+ conventions more closely
+#if defined(__WXGTK4__)
+                    gtk_image_set_from_icon_name(GTK_IMAGE(icon), stockid);
+#else 
+                    gtk_image_set_from_icon_name(GTK_IMAGE(icon), stockid, GTK_ICON_SIZE_MENU);
+#endif
+                    gtk_label_set_text(GTK_LABEL(label), stockid);
+                } else {
+                    // new lable(""), already done
+                    // new image(), already done
+                }
+            }
+#else
+wxGCC_WARNING_SUPPRESS(deprecated-declarations)            
+if (mitem->GetBitmap().IsOk())
             {
                 menuItem = gtk_image_menu_item_new_with_label("");
             }
